@@ -57,7 +57,7 @@ async function runReport() {
       }
     });
 
-    console.log('Success! Report updated successfully.');
+    console.log('Success! Dashboard report updated successfully.');
   } catch (error) {
     console.error('An error occurred while running the report:', error);
   }
@@ -171,5 +171,10 @@ function getCurrentTime(timezone) {
   });
 }
 
-// Kick off execution
-runReport();
+// Export function for orchestrator use
+module.exports = { runReport };
+
+// Keep standalone execution active if invoked directly
+if (require.main === module) {
+  runReport();
+}

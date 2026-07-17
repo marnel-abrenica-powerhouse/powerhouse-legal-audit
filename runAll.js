@@ -8,6 +8,7 @@ const { updateRolesColumn } = require('./updateRolescolumn');
 const { updateAlvandiWorkflowMapping } = require('./updateAlvandiWorkflowMappings');
 const { updateLigoriWorkflowMapping } = require('./updateLigoriWorkflowMapping');
 const { updateAlvandiPiFiletypes } = require('./updateAlvandiPIFileTypes');
+const { runReport } = require('./runReport'); // Imported dashboard metrics engine
 
 async function main() {
   console.log('=== 🚀 STARTING MASTER REPORT RUNNER ===');
@@ -26,7 +27,6 @@ async function main() {
       //syncUniqueBermanFiletypesToPHSheet(), // Berman Variant 1
       //syncUniqueBermanLawFiletypesToPHSheet() // Berman Variant 2
       updateAlvandiPiFiletypes()
-      
     ]);
 
     // STEP 3: Lookup missing Powerhouse API Workflow IDs based on matching names
@@ -46,6 +46,10 @@ async function main() {
       updateAlvandiWorkflowMapping(),
       updateLigoriWorkflowMapping()
     ]);
+
+    // STEP 6: Refresh Dashboard tracking summaries with newly mapped data
+    console.log('\n--- Step 6: Updating Summary Metrics Dashboard Panel ---');
+    await runReport();
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`\n=== ✅ ALL REPORTS EXECUTED SUCCESSFULLY IN ${duration}s ===`);
