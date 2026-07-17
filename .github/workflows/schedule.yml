@@ -1,11 +1,11 @@
 name: Execute Powerhouse Automation Reports
 
 on:
-  schedule:
-    # Customize your cron expressions at https://crontab.guru/
-    - cron: '*/10 * * * *'
+  # Listens for an incoming external API ping
+  repository_dispatch:
+    types: [trigger-powerhouse-audit]
   
-  # Allows you to trigger this workflow manually from the GitHub UI Actions tab anytime
+  # Keeps the manual button active in the UI
   workflow_dispatch:
 
 jobs:
