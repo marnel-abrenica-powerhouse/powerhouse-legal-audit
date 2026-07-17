@@ -7,6 +7,7 @@ const { populateLigoriWorkflowIdsLive } = require('./populateLigoriWorkflowIds')
 const { updateRolesColumn } = require('./updateRolescolumn');
 const { updateAlvandiWorkflowMapping } = require('./updateAlvandiWorkflowMappings');
 const { updateLigoriWorkflowMapping } = require('./updateLigoriWorkflowMapping');
+const { updateAlvandiPiFiletypes } = require('./updateAlvandiPIFileTypes');
 
 async function main() {
   console.log('=== 🚀 STARTING MASTER REPORT RUNNER ===');
@@ -20,10 +21,12 @@ async function main() {
     // STEP 2: Find any newly encountered unique filetypes and parse their storage definitions
     console.log('\n--- Step 2: Extracting and Syncing New Unique File Types ---');
     await Promise.all([
-      syncUniqueFiletypesToPHSheet(),       // Alvandi
-      syncUniqueLigoriFiletypesToPHSheet(), // Ligori
-      syncUniqueBermanFiletypesToPHSheet(), // Berman Variant 1
-      syncUniqueBermanLawFiletypesToPHSheet() // Berman Variant 2
+      //syncUniqueFiletypesToPHSheet(),       // Alvandi
+      //syncUniqueLigoriFiletypesToPHSheet(), // Ligori
+      //syncUniqueBermanFiletypesToPHSheet(), // Berman Variant 1
+      //syncUniqueBermanLawFiletypesToPHSheet() // Berman Variant 2
+      updateAlvandiPiFiletypes()
+      
     ]);
 
     // STEP 3: Lookup missing Powerhouse API Workflow IDs based on matching names
