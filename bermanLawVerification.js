@@ -25,7 +25,11 @@ async function verifyFolderPath() {
   const sheetData = response.data.values || [];
   if (sheetData.length === 0) return;
 
-  const totalCount = sheetData.filter((item, idx) => idx > 0 && item[0] === 'false').length;
+const totalCount = sheetData.filter((item, idx) => 
+    idx > 0 && 
+    String(item[0]).toUpperCase() === 'FALSE' && 
+    item[1] && String(item[1]).trim() !== ''
+  ).length;
   let totalVerified = 0;
   
   const batchUpdates = [];
@@ -147,7 +151,7 @@ async function lookUpFileViaRootFolderID(caseId, rootFolderID, docName) {
 
   let docNameCleaned = docName.replace(/:/g, '_').replace(/'/g, '_').replace(/\//g, ' ');
 
-  console.log("Searching for document:", docNameCleaned);
+  //console.log("Searching for document:", docNameCleaned);
   const payload = {
     "offset": 0,
     "filter": docNameCleaned,
