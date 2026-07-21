@@ -6,9 +6,23 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function executeLigoriLawVerification() {
   try {
+    // 1. Verify Cookie Exists Before Running
+    if (!ligoriCookie || ligoriCookie.trim() === '') {
+      throw new Error('COOKIE_MISSING: LIGORI_COOKIE is missing from your .env file or GitHub Secrets!');
+    }
+
     await verifyFolderPathLigori();
   } catch (error) {
-    console.error('Error in auditing Ligori Law files:', error);
+    if (error.message && error.message.includes('COOKIE')) {
+      console.error('\n================================================================');
+      console.error('❌ CRITICAL AUTHENTICATION / COOKIE ERROR DETECTED (Ligori Law)');
+      console.error(`DETAILS: ${error.message}`);
+      console.error('Halting execution immediately to prevent invalid row processing.');
+      console.error('================================================================\n');
+      process.exit(1); // Force process failure so GitHub Actions alerts you
+    } else {
+      console.error('Error in auditing Ligori Law files:', error);
+    }
   }
 }
 
@@ -80,7 +94,7 @@ async function verifyFolderPathLigori() {
       rowUpdates.push({ range: `${sheetName}!U${rowNum}`, values: [[todayStr]] });
     }
 
-    // 🔥 Real-time immediate update to Google Sheets for this row
+    // Real-time immediate update to Google Sheets
     if (rowUpdates.length > 0) {
       await sheets.spreadsheets.values.batchUpdate({
         spreadsheetId: SPREADSHEET_ID,
@@ -89,13 +103,26 @@ async function verifyFolderPathLigori() {
           data: rowUpdates
         }
       });
-      console.log(`  └─ 🚀 Real-time update applied to Row ${rowNum} in Google Sheets.`);
+      process.stdout.write(`  └─ 🚀 Real-time update applied to Row ${rowNum} in Google Sheets.\n`);
     }
 
     totalVerified++;
   }
 
   console.log('Execution of Ligori Law Verification complete.');
+}
+
+/**
+ * Validates whether the API response indicates an expired or invalid cookie session
+ */
+function handleCookieValidation(response, apiName) {
+  if (response.status === 401 || response.status === 403) {
+    throw new Error(`COOKIE_EXPIRED: ${apiName} returned HTTP ${response.status} (Unauthorized/Forbidden). Your Filevine session cookie has expired.`);
+  }
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('text/html')) {
+    throw new Error(`COOKIE_EXPIRED: ${apiName} returned an HTML login page instead of JSON. Your Filevine session cookie is invalid.`);
+  }
 }
 
 async function getProjectRootFolderIDLigori(caseId) {
@@ -110,10 +137,13 @@ async function getProjectRootFolderIDLigori(caseId) {
 
   try {
     const response = await fetch(url, options);
+    handleCookieValidation(response, 'getProjectRootFolderIDLigori');
+
     if (!response.ok) return null;
     const json = await response.json();
     return (json.data.index.projectRootFolderID).toString();
   } catch (e) {
+    if (e.message && e.message.includes('COOKIE')) throw e;
     console.error(e.message);
     return null;
   } finally {
@@ -146,6 +176,8 @@ async function lookUpFileViaRootFolderIDLigori(caseId, rootFolderID, docName) {
 
   try {
     const response = await fetch(url, options);
+    handleCookieValidation(response, 'lookUpFileViaRootFolderIDLigori');
+
     if (!response.ok) return returnData;
     const json = await response.json();
     if (json.data.length > 0) {
@@ -160,6 +192,7 @@ async function lookUpFileViaRootFolderIDLigori(caseId, rootFolderID, docName) {
     }
     return returnData;
   } catch (e) {
+    if (e.message && e.message.includes('COOKIE')) throw e;
     console.error(e.message);
     return returnData;
   } finally {
@@ -181,6 +214,8 @@ async function getPathViaFolderIdLigori(caseId, folderId) {
 
   try {
     const response = await fetch(url, options);
+    handleCookieValidation(response, 'getPathViaFolderIdLigori');
+
     if (!response.ok) return "";
     const json = await response.json();
     const folderName = json.data.name;
@@ -191,6 +226,7 @@ async function getPathViaFolderIdLigori(caseId, folderId) {
     }
     return parentFolderName + folderName;
   } catch (e) {
+    if (e.message && e.message.includes('COOKIE')) throw e;
     console.error(e.message);
     return "";
   } finally {
