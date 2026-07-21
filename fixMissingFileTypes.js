@@ -1,9 +1,9 @@
 const { sheets, SPREADSHEET_ID } = require('./googleClient');
 
 const LOG_SHEETS = [
-  'Ligori Logs',
-  'Alvandi Logs',
-  'Berman Law Logs'
+  { sheetName: 'Ligori Logs', companyId: 246 },
+  { sheetName: 'Alvandi Logs', companyId: 164 },
+  { sheetName: 'Berman Law Logs', companyId: 216 }
 ];
 
 // Controlled parallel pooling limit
@@ -33,8 +33,11 @@ async function fixMissingFileTypes() {
   const invalidTypes = ["", "N/A", "Error"];
 
   try {
-    for (const sheetName of LOG_SHEETS) {
-      console.log(`\n🔎 Scanning sheet: "${sheetName}"...`);
+    for (const target of LOG_SHEETS) {
+      const sheetName = target.sheetName;
+      const companyId = target.companyId;
+
+      console.log(`\n🔎 Scanning sheet: "${sheetName}" (Company ${companyId})...`);
       
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
@@ -51,12 +54,15 @@ async function fixMissingFileTypes() {
 
       for (let i = 1; i < rows.length; i++) {
         const fileId = rows[i][3] ? String(rows[i][3]).trim() : "";   // Column D
+        const fileName = rows[i][4] ? String(rows[i][4]).trim() : ""; // Column E
         const fileType = rows[i][5] ? String(rows[i][5]).trim() : ""; // Column F
         
         if (fileId && invalidTypes.includes(fileType)) {
           rowsToRepair.push({
             rowIndex: i + 1,
-            fileId: fileId
+            fileId: fileId,
+            fileName: fileName,
+            companyId: companyId
           });
         }
       }
@@ -68,11 +74,10 @@ async function fixMissingFileTypes() {
 
       console.log(`   Found ${rowsToRepair.length} broken entries in "${sheetName}". Repairing...`);
 
-      // Fetch file types concurrently and log out the individual item adjustments
+      // Fetch file types concurrently (using Primary -> Secondary fallback)
       const updatePayloads = await PromisePool(rowsToRepair, CONCURRENCY_LIMIT, async (row) => {
-        const freshFileType = await fetchFileType(row.fileId);
+        const freshFileType = await fetchFileType(row.fileId, row.fileName, row.companyId);
         
-        // Detailed tracking log printed directly to your console
         console.log(`     ↳ [FIXED] Row ${row.rowIndex.toString().padEnd(4)} | File ID: ${row.fileId.padEnd(8)} ➔ New Type: "${freshFileType}"`);
         
         return {
@@ -81,7 +86,7 @@ async function fixMissingFileTypes() {
         };
       });
 
-      // Commit changes in one efficient block write
+      // Commit changes in one batch
       await sheets.spreadsheets.values.batchUpdate({
         spreadsheetId: SPREADSHEET_ID,
         requestBody: {
@@ -102,28 +107,90 @@ async function fixMissingFileTypes() {
   }
 }
 
-async function fetchFileType(fileId) {
-  if (!fileId) return "N/A";
-  const url = `https://www.powerhouse.center/api/backend/nest/raw-files/processed-legal-file/${fileId}`;
-  const options = {
-    method: "GET",
-    headers: {
-      "sec-ch-ua-platform": "\"Windows\"",
-      "Referer": "https://www.powerhouse.center/",
-      "User-Agent": "Mozilla/5.0",
-      "content-type": "application/json",
-      "x-api-key": "000647fd8e772d78e35b423895958090525a9f93084d9cd6978497cd8754748b"
+async function fetchFileType(fileId, fileName = "", companyId = null) {
+  let fileType = "N/A";
+  const invalidTypes = ["", "N/A", "Error", null, undefined];
+
+  // 1. Try Primary API
+  if (fileId) {
+    const primaryUrl = `https://www.powerhouse.center/api/backend/nest/raw-files/processed-legal-file/${fileId}`;
+    const primaryOptions = {
+      method: "GET",
+      headers: {
+        "sec-ch-ua-platform": "\"Windows\"",
+        "Referer": "https://www.powerhouse.center/",
+        "User-Agent": "Mozilla/5.0",
+        "content-type": "application/json",
+        "x-api-key": "000647fd8e772d78e35b423895958090525a9f93084d9cd6978497cd8754748b"
+      }
+    };
+
+    try {
+      const response = await fetch(primaryUrl, primaryOptions);
+      if (response.ok) {
+        const json = await response.json();
+        fileType = json?.data?.legalProcessedFile?.companySpecificFileType?.name || "N/A";
+      }
+    } catch (e) {
+      fileType = "Error";
     }
+  }
+
+  // Return immediately if Primary API succeeds
+  if (!invalidTypes.includes(fileType)) {
+    return fileType;
+  }
+
+  // 2. Fallback to Secondary API if Primary failed
+  if (fileName && companyId) {
+    try {
+      console.log(`       ⚠️ Primary API returned "${fileType}" for File ID: ${fileId}. Triggering fallback API for "${fileName}"...`);
+      const secondaryFileType = await fetchFileTypeSecondary(fileName, companyId);
+      
+      if (secondaryFileType && !invalidTypes.includes(secondaryFileType)) {
+        return secondaryFileType;
+      }
+    } catch (err) {
+      console.error(`       ❌ Secondary API lookup failed for "${fileName}":`, err.message);
+    }
+  }
+
+  return "N/A";
+}
+
+async function fetchFileTypeSecondary(fileName, companyId) {
+  const url = 'https://product-node-api.powerhouse.so/api/v1/admin/fetch-incoming-emails';
+
+  const payload = {
+    incomingMailSearch: fileName,
+    processedAtDateRange: {
+      start: "2023-12-02",
+      end: "2027-12-09"
+    },
+    reviewerSelector: [],
+    organizationSelectorIncomingMail: [Number(companyId)],
+    fileTypeSelector: [],
+    statusSelect: [],
+    adjNumberSelector: [],
+    page: 1,
+    limit: 1
   };
 
-  try {
-    const response = await fetch(url, options);
-    if (!response.ok) return "N/A";
-    const json = await response.json();
-    return json?.data?.legalProcessedFile?.companySpecificFileType?.name || "N/A";
-  } catch (e) {
-    return "Error";
-  }
+  const options = {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent": "Retool/2.0 (+https://docs.tryretool.com/docs/apis)",
+      "x-api-key": "000647fd8e772d78e35b423895958090525a9f93084d9cd6978497cd8754748b"
+    },
+    body: JSON.stringify(payload)
+  };
+
+  const response = await fetch(url, options);
+  if (!response.ok) return "N/A";
+
+  const json = await response.json();
+  return json?.data?.[0]?.legal_file_type_name || "N/A";
 }
 
 module.exports = { fixMissingFileTypes };
