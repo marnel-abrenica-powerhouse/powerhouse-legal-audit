@@ -22,7 +22,7 @@ const orgInfo = {
   }
 };
 
-// Elegant concurrency pool helper to limit parallel API lookups safely
+// Concurrency pool helper
 async function PromisePool(items, batchSize, workerFn) {
   const results = [];
   const executing = new Set();
@@ -82,7 +82,7 @@ async function getDocumentSyncLogs(company_id, sheetName, timezone) {
     page: 1,
     limit: 500,
     status: "Completed",
-    started_after: "2026-07-19T00:00:00.000-07:00",
+    started_after: "2026-07-06T00:00:00.000-07:00",
     started_before: "2027-12-01T23:59:59.999-07:00"
   };
 
@@ -108,13 +108,13 @@ async function getDocumentSyncLogs(company_id, sheetName, timezone) {
     
     for (const key of possibleKeys) {
       if (Array.isArray(json[key])) {
-        await writeToSheet(json[key], sheetName, timezone);
+        await writeToSheet(json[key], sheetName, timezone, company_id);
         return;
       }
     }
 
     if (Array.isArray(json)) {
-      await writeToSheet(json, sheetName, timezone);
+      await writeToSheet(json, sheetName, timezone, company_id);
       return;
     }
 
@@ -124,7 +124,7 @@ async function getDocumentSyncLogs(company_id, sheetName, timezone) {
   }
 }
 
-async function writeToSheet(data, sheetName, timezone) {
+async function writeToSheet(data, sheetName, timezone, company_id) {
   const sheetId = await ensureSheetExists(sheetName);
 
   // Read existing content
@@ -153,20 +153,21 @@ async function writeToSheet(data, sheetName, timezone) {
   const existingFileIds = new Set();
   const rowsToUpdate = [];
 
-  // Parse existing rows to flag missing, null, N/A or Error fileTypes for re-fetching
+  // Parse existing rows: check for missing/invalid fileTypes and extract filename
   for (let i = 1; i < existingRows.length; i++) {
     const fileIdCol = existingRows[i][3] ? String(existingRows[i][3]).trim() : "";
+    const fileNameCol = existingRows[i][4] ? String(existingRows[i][4]).trim() : "";
     const fileTypeCol = existingRows[i][5] ? String(existingRows[i][5]).trim() : "";
     
     if (fileIdCol) {
       existingFileIds.add(fileIdCol);
       if (invalidTypes.includes(fileTypeCol)) {
-        rowsToUpdate.push({ rowIndex: i + 1, fileId: fileIdCol });
+        rowsToUpdate.push({ rowIndex: i + 1, fileId: fileIdCol, fileName: fileNameCol });
       }
     }
   }
 
-  // Filter incoming API records to extract completely new items
+  // Filter new records from API
   const itemsToAppend = data.filter(item => {
     const fileId = String(item.legal_processed_file_id || "").trim();
     return fileId && !existingFileIds.has(fileId);
@@ -178,11 +179,11 @@ async function writeToSheet(data, sheetName, timezone) {
     return;
   }
 
-  // 1. Correct existing rows with bad fileTypes in place via batch updates
+  // 1. Correct existing rows with bad fileTypes in place via primary -> secondary fallback
   if (rowsToUpdate.length > 0) {
     console.log(`Re-fetching and updating ${rowsToUpdate.length} rows with invalid File Types on: ${sheetName}...`);
     const updatePayloads = await PromisePool(rowsToUpdate, 15, async (row) => {
-      const freshFileType = await fetchFileType(row.fileId);
+      const freshFileType = await fetchFileType(row.fileId, row.fileName, company_id);
       return {
         range: `${sheetName}!F${row.rowIndex}`,
         values: [[freshFileType]]
@@ -203,7 +204,8 @@ async function writeToSheet(data, sheetName, timezone) {
     console.log(`Fetching File Types for ${itemsToAppend.length} new records on: ${sheetName}...`);
     const resolvedRows = await PromisePool(itemsToAppend, 15, async (item) => {
       const fileId = String(item.legal_processed_file_id || "").trim();
-      const fileType = await fetchFileType(fileId);
+      const fileName = item.legal_processed_file?.name || "";
+      const fileType = await fetchFileType(fileId, fileName, company_id);
       
       const syncedAtStr = parseDate(item.ended_at, timezone);
       const processedAtStr = parseDate(item.legal_processed_file?.created_at, timezone);
@@ -213,7 +215,7 @@ async function writeToSheet(data, sheetName, timezone) {
         syncedAtStr,                                       // Synced At
         processedAtStr,                                    // Processed At
         fileId,                                            // File ID
-        item.legal_processed_file?.name || "",             // File Name
+        fileName,                                          // File Name
         fileType,                                          // File Type
         item.legal_processed_file?.case_name || "",       // Case Name
         item.legal_processed_file?.case_id || "",         // Case ID
@@ -277,7 +279,6 @@ async function writeToSheet(data, sheetName, timezone) {
     });
   }
 
-  // Get accurate count of rows after mutations and run standard sorting spec
   const finalCountResponse = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
     range: `${sheetName}!A:A`
@@ -336,28 +337,90 @@ async function sortBySyncedAt(sheetName, sheetId, lastRow) {
   });
 }
 
-async function fetchFileType(fileId) {
-  if (!fileId) return "N/A";
-  const url = `https://www.powerhouse.center/api/backend/nest/raw-files/processed-legal-file/${fileId}`;
-  const options = {
-    method: "GET",
-    headers: {
-      "sec-ch-ua-platform": "\"Windows\"",
-      "Referer": "https://www.powerhouse.center/",
-      "User-Agent": "Mozilla/5.0",
-      "content-type": "application/json",
-      "x-api-key": "000647fd8e772d78e35b423895958090525a9f93084d9cd6978497cd8754748b"
+async function fetchFileType(fileId, fileName = "", companyId = null) {
+  let fileType = "N/A";
+  const invalidTypes = ["", "N/A", "Error", null, undefined];
+
+  // 1. Try Primary API
+  if (fileId) {
+    const primaryUrl = `https://www.powerhouse.center/api/backend/nest/raw-files/processed-legal-file/${fileId}`;
+    const primaryOptions = {
+      method: "GET",
+      headers: {
+        "sec-ch-ua-platform": "\"Windows\"",
+        "Referer": "https://www.powerhouse.center/",
+        "User-Agent": "Mozilla/5.0",
+        "content-type": "application/json",
+        "x-api-key": "000647fd8e772d78e35b423895958090525a9f93084d9cd6978497cd8754748b"
+      }
+    };
+
+    try {
+      const response = await fetch(primaryUrl, primaryOptions);
+      if (response.ok) {
+        const json = await response.json();
+        fileType = json?.data?.legalProcessedFile?.companySpecificFileType?.name || "N/A";
+      }
+    } catch (e) {
+      fileType = "Error";
     }
+  }
+
+  // Return immediately if Primary API succeeds
+  if (!invalidTypes.includes(fileType)) {
+    return fileType;
+  }
+
+  // 2. Fallback to Secondary API if Primary failed
+  if (fileName && companyId) {
+    try {
+      console.log(`Primary API returned "${fileType}" for File ID: ${fileId}. Attempting fallback API for "${fileName}" (Company ${companyId})...`);
+      const secondaryFileType = await fetchFileTypeSecondary(fileName, companyId);
+      
+      if (secondaryFileType && !invalidTypes.includes(secondaryFileType)) {
+        return secondaryFileType;
+      }
+    } catch (err) {
+      console.error(`Secondary API lookup failed for "${fileName}":`, err.message);
+    }
+  }
+
+  return "N/A";
+}
+
+async function fetchFileTypeSecondary(fileName, companyId) {
+  const url = 'https://product-node-api.powerhouse.so/api/v1/admin/fetch-incoming-emails';
+
+  const payload = {
+    incomingMailSearch: fileName,
+    processedAtDateRange: {
+      start: "2023-12-02",
+      end: "2027-12-09"
+    },
+    reviewerSelector: [],
+    organizationSelectorIncomingMail: [Number(companyId)],
+    fileTypeSelector: [],
+    statusSelect: [],
+    adjNumberSelector: [],
+    page: 1,
+    limit: 1
   };
 
-  try {
-    const response = await fetch(url, options);
-    if (!response.ok) return "N/A";
-    const json = await response.json();
-    return json?.data?.legalProcessedFile?.companySpecificFileType?.name || "N/A";
-  } catch (e) {
-    return "Error";
-  }
+  const options = {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent": "Retool/2.0 (+https://docs.tryretool.com/docs/apis)",
+      "x-api-key": "000647fd8e772d78e35b423895958090525a9f93084d9cd6978497cd8754748b"
+    },
+    body: JSON.stringify(payload)
+  };
+
+  const response = await fetch(url, options);
+  if (!response.ok) return "N/A";
+
+  const json = await response.json();
+  return json?.data?.[0]?.legal_file_type_name || "N/A";
 }
 
 async function updateLigoriFolderStorage() {
