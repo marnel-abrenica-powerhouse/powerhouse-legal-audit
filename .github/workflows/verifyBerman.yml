@@ -25,4 +25,5 @@ jobs:
         SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
         BERMAN_COOKIE: ${{ secrets.BERMAN_COOKIE }}
-      run: node bermanLawVerification.js
+        FORCE_COLOR: "1"
+      run: node --no-warnings bermanLawVerification.js

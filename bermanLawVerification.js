@@ -91,17 +91,22 @@ async function verifyFolderPath() {
       rowUpdates.push({ range: `${sheetName}!U${rowNum}`, values: [[todayStr]] });
     }
 
-    // 🔥 Real-time immediate update to Google Sheets for this row
-    if (rowUpdates.length > 0) {
-      await sheets.spreadsheets.values.batchUpdate({
-        spreadsheetId: SPREADSHEET_ID,
-        requestBody: {
-          valueInputOption: 'USER_ENTERED',
-          data: rowUpdates
+    // Real-time immediate update to Google Sheets for this row
+        if (rowUpdates.length > 0) {
+          await sheets.spreadsheets.values.batchUpdate({
+            spreadsheetId: SPREADSHEET_ID,
+            requestBody: {
+              valueInputOption: 'USER_ENTERED',
+              data: rowUpdates
+            }
+          });
+          
+          // Print immediately to stdout
+          process.stdout.write(`  └─ 🚀 Real-time update applied to Row ${rowNum} in Google Sheets.\n`);
+          
+          // Pause 1.5 seconds between rows so Google Sheets UI can render live
+          await sleep(1500); 
         }
-      });
-      console.log(`  └─ 🚀 Real-time update applied to Row ${rowNum} in Google Sheets.`);
-    }
 
     totalVerified++;
   }

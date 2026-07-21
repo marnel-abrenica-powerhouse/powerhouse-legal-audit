@@ -25,4 +25,5 @@ jobs:
         SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
         LIGORI_COOKIE: ${{ secrets.LIGORI_COOKIE }}
-      run: node ligoriLawVerification.js
+        FORCE_COLOR: "1"
+      run: node --no-warnings ligoriLawVerification.js
