@@ -1,0 +1,28 @@
+name: Manual Verify Berman Law
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-berman-verification:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code Repository
+      uses: actions/checkout@v4
+
+    - name: Initialize Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: 'npm'
+
+    - name: Install Dependencies
+      run: npm install
+
+    - name: Execute Berman Law Verification
+      env:
+        SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+        GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+        BERMAN_COOKIE: ${{ secrets.BERMAN_COOKIE }}
+      run: node bermanLawVerification.js
